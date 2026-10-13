@@ -1,0 +1,100 @@
+name: Build and release
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install pinned Zig toolchain
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $archive = Join-Path $env:RUNNER_TEMP 'zig-0.15.2.zip'
+          Invoke-WebRequest 'https://ziglang.org/download/0.15.2/zig-x86_64-windows-0.15.2.zip' -OutFile $archive
+          $expected = '3a0ed1e8799a2f8ce2a6e6290a9ff22e6906f8227865911fb7ddedc3cc14cb0c'
+          if ((Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant() -ne $expected) { throw 'Zig download digest mismatch' }
+          Expand-Archive -LiteralPath $archive -DestinationPath (Join-Path $env:RUNNER_TEMP 'zig')
+          (Join-Path $env:RUNNER_TEMP 'zig\zig-x86_64-windows-0.15.2') | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+      - name: Fetch verified admission mod release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $headers = @{ Accept = 'application/vnd.github+json'; Authorization = ('Bearer ' + $env:GH_TOKEN); 'X-GitHub-Api-Version' = '2022-11-28' }
+          $repository = 'Razzyk/hoi4-admission-mod'
+          $release = Invoke-RestMethod ('https://api.github.com/repos/' + $repository + '/releases/latest') -Headers $headers
+          if ($release.draft -or $release.prerelease) { throw 'Only stable admission mod releases can be bundled' }
+          $assets = @($release.assets | Where-Object { $_.name -ceq 'HOI4-Admission-Mod-win-x64.zip' })
+          if ($assets.Count -ne 1 -or $assets[0].digest -cnotmatch '^sha256:[a-f0-9]{64}$') { throw 'Module release is missing its archive or GitHub SHA256 digest' }
+          $asset = $assets[0]
+          $expectedUrl = 'https://github.com/' + $repository + '/releases/download/' + $release.tag_name + '/' + $asset.name
+          if ($asset.browser_download_url -cne $expectedUrl -or $asset.size -le 0 -or $asset.size -gt 104857600) { throw 'Unexpected module asset location or size' }
+          $archive = Join-Path $env:RUNNER_TEMP 'module.zip'
+          Invoke-WebRequest $expectedUrl -OutFile $archive
+          if ((Get-Item -LiteralPath $archive).Length -ne $asset.size -or (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant() -cne $asset.digest.Substring(7)) { throw 'Module download digest mismatch' }
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $allowed = @('HOI4Admission.dll', 'AdmissionService.exe', 'mod-manifest.json', 'module-release.json')
+          $bundle = Join-Path $pwd 'bundled-module'
+          New-Item -ItemType Directory -Force -Path $bundle | Out-Null
+          $zip = [System.IO.Compression.ZipFile]::OpenRead($archive)
+          try {
+            $seen = @{}
+            foreach ($entry in $zip.Entries) {
+              if ($allowed -cnotcontains $entry.FullName -or $seen.ContainsKey($entry.FullName) -or $entry.Length -le 0 -or $entry.Length -gt 104857600 -or (($entry.ExternalAttributes -shr 16) -band 0xf000) -eq 0xa000) { throw 'Unexpected module archive content' }
+              $seen[$entry.FullName] = $true
+            }
+            if ($seen.Count -ne 4) { throw 'Module archive is incomplete' }
+            foreach ($entry in $zip.Entries) { [System.IO.Compression.ZipFileExtensions]::ExtractToFile($entry, (Join-Path $bundle $entry.FullName), $true) }
+          } finally { $zip.Dispose() }
+          # build.ps1 verifies the package descriptor and every declared file digest.
+      - name: Build Windows release
+        shell: pwsh
+        run: ./build.ps1 -Zig zig -WorkDirectory (Join-Path $env:RUNNER_TEMP 'injector-build')
+      - name: Validate installer and updater
+        shell: pwsh
+        run: |
+          ./tests/InstallerTests.ps1 -WorkDirectory (Join-Path $env:RUNNER_TEMP 'installer-tests')
+          ./tests/Test-Updater.ps1 -WorkDirectory (Join-Path $env:RUNNER_TEMP 'updater-tests')
+          ./tests/Test-Coordinator.ps1 -WorkDirectory (Join-Path $env:RUNNER_TEMP 'coordinator-tests')
+          ./tests/Test-Loader.ps1 -WorkDirectory (Join-Path $env:RUNNER_TEMP 'loader-tests') -LoaderPath (Join-Path $env:RUNNER_TEMP 'injector-build/AdmissionLoader.exe')
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: HOI4-Injector-win-x64
+          path: dist/*
+  publish:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: windows
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: HOI4-Injector-win-x64
+          path: dist
+      - name: Publish tagged release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view $env:GITHUB_REF_NAME --repo $env:GITHUB_REPOSITORY --json id 2>$null
+          if ($LASTEXITCODE -eq 0) {
+            Write-Output 'Release already exists; existing assets retained. Publish a new version for changed binaries.'
+          } else {
+            gh release create $env:GITHUB_REF_NAME dist/HOI4Injector-Setup.exe dist/HOI4-Injector-win-x64.zip dist/SHA256SUMS.txt --repo $env:GITHUB_REPOSITORY --title ('HOI4 Injector ' + $env:GITHUB_REF_NAME) --generate-notes --verify-tag
+          }
+          if ($LASTEXITCODE -ne 0) { throw 'Release publishing failed' }

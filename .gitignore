@@ -1,0 +1,12 @@
+work/
+dist/
+runtime/
+bundled-module/
+.zig-cache/
+zig-cache/
+zig-out/
+*.exe
+*.dll
+*.lib
+*.pdb
+*.zip
