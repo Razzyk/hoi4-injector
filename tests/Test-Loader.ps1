@@ -21,3 +21,5 @@ try {
     if (@($fixture.Modules | Where-Object ModuleName -eq 'HOI4Admission.dll').Count -ne 0) { throw 'Unsupported process was modified' }
     Write-Output 'PASS enabled native loader refuses unsupported executable before DLL loading'
 } finally { $fixture.WaitForExit(); $fixture.Dispose() }
+# The loader's intentional refusal is a passing test, not this script's exit status.
+$global:LASTEXITCODE = 0
