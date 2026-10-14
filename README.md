@@ -9,6 +9,8 @@ Windows launcher with automatic DLL loading, a native lobby verification manager
 
 Start the injector before starting HOI4 through Steam. It detects the game, waits for it to respond, loads the bundled admission DLL and shows its verification state. If the Steam installation is elsewhere, setup searches the Steam libraries or lets you select `hoi4.exe`. Closing the manager window hides it to the tray; use its tray menu to exit. Windows sign-in startup is optional.
 
+When upgrading from the earlier prototype, exit its old manager first and restart any game containing the older DLL. Run one injector manager for the session.
+
 Requires **Windows x64, .NET Framework 4.8 and HOI4 1.19.3.0** with SHA256 `7dc947be34970da1e1c787bcddbe7f62b610ff258aebf8f06aa8b348f3a031d5`. Other game builds are refused. The release includes a compatible module, so first run does not depend on downloading one. Binaries are unsigned.
 
 The native module enforces normal joining: an injected host refuses a client without a valid DLL ticket, and accepts a verified client's request. The completed local game test confirmed that the injected client joined and the plain client stayed out. HOI4 displayed a timeout for the plain copy; **Last refused join** in this manager displays the host's actual reason.

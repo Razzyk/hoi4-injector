@@ -10,4 +10,6 @@ The Windows x64 injector, native loader, setup program and uninstaller build wit
 
 The module's existing real normal-join test demonstrated an injected client joining an injected host and a plain client being refused. Native module behavior is unchanged by the repository split. The module repository documents its native tests, supported executable fingerprints and multiplayer limits.
 
+Both public release workflows passed. The actual published v0.4.0 setup was downloaded and matched GitHub's SHA256 digest, then extracted into an isolated installation. Its normal GUI ran, detected a newly launched real HOI4 copy with a separate profile, loaded the published module and obtained a verified service lease. The read-only inspector confirmed all three native guards active with original page protections restored. Live pipe-peer checks rejected spoofed join-ticket requests. The test game closed normally, and its temporary manager/service stopped. No ordinary game profile or Windows startup setting was changed.
+
 The service currently supports participants on one Windows machine. Remote verification, live positive hotjoin/reconnect and crossplay remain outstanding capabilities. A valid update must match this injector's supported game/protocol; unsupported game builds are refused.
